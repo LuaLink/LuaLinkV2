@@ -1,7 +1,7 @@
 import io.papermc.hangarpublishplugin.model.Platforms
 
 plugins {
-    kotlin("jvm") version "2.0.21"
+    kotlin("jvm") version "2.1.20"
     id("de.eldoria.plugin-yml.paper") version "0.7.1"
     id("xyz.jpenilla.run-paper") version "2.3.1"
     id("com.gradleup.shadow") version "8.3.6"
