@@ -94,6 +94,58 @@ local function copyTable(t, visited)
     return result
 end
 
+local function load_teal_file_with_config(filename, config, sandbox_env)
+    -- Read the file
+    local file = io.open(filename, "rb")
+    if not file then
+        return nil, "Could not open file: " .. filename
+    end
+
+    local content = file:read("*a")
+    file:close()
+
+    -- Create Teal environment with your config
+    local teal_env = tl.new_env({
+        defaults = {
+            feat_lax = config.lax and "on" or "off",
+            feat_arity = config.arity and "on" or "off",
+            gen_compat = config.gen_compat or "optional",
+            gen_target = config.gen_target or "5.1"
+        }
+    })
+
+    -- Type check and compile
+    local result = tl.check_string(content, teal_env, filename)
+
+    -- Check for errors
+    if #result.syntax_errors > 0 or #result.type_errors > 0 then
+        local errors = {}
+        for _, err in ipairs(result.syntax_errors) do
+            table.insert(errors, err.filename .. ":" .. err.y .. ":" .. err.x .. ": " .. err.msg)
+        end
+        for _, err in ipairs(result.type_errors) do
+            table.insert(errors, err.filename .. ":" .. err.y .. ":" .. err.x .. ": " .. err.msg)
+        end
+        return nil, table.concat(errors, "\n")
+    end
+
+    -- Generate Lua code
+    local lua_code, gen_err = tl.generate(result.ast, teal_env.defaults.gen_target)
+    if not lua_code then
+        return nil, gen_err
+    end
+
+    -- Load with your custom sandbox
+    local chunk, load_err = load(lua_code, "@" .. filename, "t", sandbox_env)
+    if not chunk then
+        return nil, load_err
+    end
+
+    return chunk
+end
+
+
+
 --- Load and execute the init.lua file (optional)
 ---@param scriptName string Name of the script
 ---@param initPath string Path to the init.lua file
@@ -135,26 +187,43 @@ local function checkDependencies(scriptName, dependencies)
     end
 end
 
---- Load and execute the main.lua file
+--- Load and execute the main.lua or main.tl file
 ---@param scriptName string Name of the script
----@param mainPath string Path to the main.lua file
+---@param mainPath string Path to the main.lua or main.tl file
 local function loadMainFile(scriptName, mainPath)
     -- Make sure the file exists before loading
     local file = io.open(mainPath, "r")
     if not file then
-        error("main.lua for script " .. scriptName .. " does not exist")
+        error("main file for script " .. scriptName .. " does not exist")
     end
     file:close()
 
-    -- Load the main.lua file
-    local f, err = loadfile(mainPath, "t", ScriptManager.createSandbox(scriptName))
+    local f, err
+
+    -- Check if it's a Teal file
+    if mainPath:match("%.tl$") then
+        -- Use custom Teal loader
+        local config = {
+            lax = false,
+            arity = true,
+            gen_compat = "optional",
+            gen_target = "5.3"
+        }
+
+        f, err = load_teal_file_with_config(mainPath, config, ScriptManager.createSandbox(scriptName))
+    else
+        -- Use normal Lua loader
+        f, err = loadfile(mainPath, "t", ScriptManager.createSandbox(scriptName))
+    end
+
     if not f then
-        error("Failed to load main.lua for script " .. scriptName .. ": " .. tostring(err))
+        local fileType = mainPath:match("%.tl$") and "Teal" or "Lua"
+        error("Failed to load " .. fileType .. " file for script " .. scriptName .. ": " .. tostring(err))
     end
 
     local success, result = pcall(f)
     if not success then
-        error("Error running main.lua for script " .. scriptName .. ": " .. tostring(result))
+        error("Error running main file for script " .. scriptName .. ": " .. tostring(result))
     end
 end
 
@@ -298,8 +367,8 @@ end
 function ScriptManager.loadScript(scriptName)
     local scriptFolder = __plugin:getDataFolder():getAbsolutePath() .. "/scripts/" .. scriptName
     local initPath = scriptFolder .. "/init.lua"
-    local mainPath = scriptFolder .. "/main.lua"
-
+    local mainPathLua = scriptFolder .. "/main.lua"
+    local mainPathTeal = scriptFolder .. "/main.tl"
     -- Load init.lua and get metadata
     local metadata = loadInitFile(scriptName, initPath)
 
@@ -308,8 +377,24 @@ function ScriptManager.loadScript(scriptName)
         checkDependencies(scriptName, metadata.dependencies)
     end
 
+    -- Check if the main.tl file exists and load it if it does
+    local mainPath = nil
+    local file = io.open(mainPathTeal, "r")
+    if file then
+        file:close()
+        mainPath = mainPathTeal
+    else
+        -- If main.tl doesn't exist, check for main.lua
+        file = io.open(mainPathLua, "r")
+        if file then
+            file:close()
+            mainPath = mainPathLua
+        else
+            error("No main file found for script '" .. scriptName .. "'. Expected main.lua or main.tl.")
+        end
+    end
+
     local success, err = pcall(function()
-        -- Load main.lua
         loadMainFile(scriptName, mainPath)
     end)
 

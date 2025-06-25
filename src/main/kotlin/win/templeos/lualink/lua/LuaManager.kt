@@ -47,6 +47,7 @@ class LuaManager(private val plugin: LuaLink, luaRuntime: LuaRuntimes) {
         private const val LUA_SCRIPT_CLASS_PATH = "/lua/script.lua"
         private const val LUA_SCRIPT_PATH = "/lua/lualink.lua"
         private const val LUA_SCRIPT_SCHEDULER_PATH = "/lua/scheduler.lua"
+        private const val LUA_SCRIPT_TEAL_PATH = "/lua/teal/tl.lua"
     }
 
     /**
@@ -118,7 +119,7 @@ class LuaManager(private val plugin: LuaLink, luaRuntime: LuaRuntimes) {
             }
 
             // Get all subdirectories in the scripts directory that contain a main.lua file
-            val scriptFolders = scriptsDir.listFiles()?.filter { it.isDirectory && it.resolve("main.lua").exists() }
+            val scriptFolders = scriptsDir.listFiles()?.filter { it.isDirectory && (it.resolve("main.lua").exists() || it.resolve("main.tl").exists()) }
             // Create a table to hold the script names
             lua.newTable()
             // Iterate through the script folders and add their names to the table
@@ -258,6 +259,11 @@ class LuaManager(private val plugin: LuaLink, luaRuntime: LuaRuntimes) {
         val schedulerCode = loadResourceAsStringByteBuffer(LUA_SCRIPT_SCHEDULER_PATH)
         lua.load(schedulerCode, "scheduler.lua")
         lua.pCall(0, 0)
+
+        val tealCode = loadResourceAsStringByteBuffer(LUA_SCRIPT_TEAL_PATH)
+        lua.load(tealCode, "tl.lua")
+        lua.pCall(0, 1)
+        lua.setGlobal("tl")
 
         // Load the script manager implementation from resources
         val scriptManagerCode = loadResourceAsStringByteBuffer(LUA_SCRIPT_MANAGER_PATH)
